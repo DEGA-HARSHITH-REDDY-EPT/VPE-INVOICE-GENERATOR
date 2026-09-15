@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>VPE Invoice Converter</title>
+<style>
+  :root { --accent: #0e6e4e; --bg: #f6f7f5; --border: #ddd; --warn: #fff3cd; }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0; background: var(--bg); color: #1c1c1c; }
+  header { background: var(--accent); color: white; padding: 18px 28px; }
+  header h1 { margin: 0; font-size: 20px; }
+  header p { margin: 4px 0 0; font-size: 13px; opacity: 0.9; }
+  main { max-width: 1200px; margin: 24px auto; padding: 0 20px 60px; }
+  .card { background: white; border: 1px solid var(--border); border-radius: 8px; padding: 20px; margin-bottom: 20px; }
+  .dropzone { border: 2px dashed #bbb; border-radius: 8px; padding: 40px; text-align: center; cursor: pointer; transition: 0.15s; }
+  .dropzone.drag { border-color: var(--accent); background: #eef8f3; }
+  .dropzone input { display: none; }
+  button { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; }
+  button.secondary { background: #444; }
+  button:disabled { background: #aaa; cursor: not-allowed; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { border: 1px solid var(--border); padding: 6px 8px; text-align: left; }
+  th { background: #f0f0f0; position: sticky; top: 0; }
+  td[contenteditable="true"] { min-width: 60px; }
+  td.low-conf { background: var(--warn); }
+  .table-wrap { overflow-x: auto; max-height: 60vh; overflow-y: auto; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  label { display: block; font-size: 12px; color: #555; margin: 8px 0 3px; }
+  input[type=text] { width: 100%; padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px; }
+  .status { font-size: 13px; margin-top: 10px; color: #555; }
+  .status.error { color: #b00020; }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; }
+  .hint { font-size: 12px; color: #777; }
+  h2 { font-size: 16px; margin-top: 0; }
+  .legend { font-size: 12px; color: #666; margin-top: 8px; }
+  .legend span { display:inline-block; width:12px; height:12px; background:var(--warn); border:1px solid #ccc; vertical-align:middle; margin-right:4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>VPE Invoice Converter</h1>
+  <p>Upload a manufacturer invoice (PDF / CSV / XLSX) → review the extracted items → export in VPE's standard format.</p>
+</header>
+<main>
+
+  <div class="card">
+    <h2>1. Upload manufacturer invoice</h2>
+    <div class="dropzone" id="dropzone">
+      <p><strong>Click to choose a file</strong> or drag & drop it here</p>
+      <p class="hint">Supported: .pdf .csv .xlsx</p>
+      <input type="file" id="fileInput" accept=".pdf,.csv,.xlsx,.xls" />
+    </div>
+    <div class="status" id="uploadStatus"></div>
+  </div>
+
+  <div class="card" id="reviewCard" style="display:none;">
+    <h2>2. Review & edit extracted items</h2>
+    <div class="toolbar">
+      <button class="secondary" id="addRowBtn">+ Add row</button>
+      <span class="hint" id="itemCount"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="itemsTable">
+        <thead>
+          <tr>
+            <th>#</th><th>HSN</th><th>Company</th><th>Batch</th><th>Expiry</th><th>Brand</th><th>Pack</th>
+            <th>Qty</th><th>Free</th><th>MRP</th><th>Rate</th><th>Disc %</th><th>GST %</th><th>GST Amt</th><th>Amount</th><th></th>
+          </tr>
+        </thead>
+        <tbody id="itemsBody"></tbody>
+      </table>
+    </div>
+    <div class="legend"><span></span> = field the model wasn't fully confident about — double-check before exporting.</div>
+  </div>
+
+  <div class="card" id="headerCard" style="display:none;">
+    <h2>3. Buyer / order details (fill from the VPE order — not on the manufacturer's invoice)</h2>
+    <div class="grid2">
+      <div>
+        <label>Buyer (medical shop) name</label>
+        <input type="text" id="buyerName" placeholder="M/s Shri Laxmi Medical Hall" />
+        <label>Buyer address</label>
+        <input type="text" id="buyerAddress" />
+        <label>Buyer phone</label>
+        <input type="text" id="buyerPhone" />
+        <label>Buyer email</label>
+        <input type="text" id="buyerEmail" />
+        <label>Buyer DL No</label>
+        <input type="text" id="buyerDlNo" />
+        <label>Buyer GSTIN</label>
+        <input type="text" id="buyerGstin" />
+      </div>
+      <div>
+        <label>Order ID</label>
+        <input type="text" id="orderId" />
+        <label>Invoice No (VPE)</label>
+        <input type="text" id="invNo" />
+        <label>Invoice Date (DD-MM-YYYY)</label>
+        <input type="text" id="invoiceDate" />
+        <label>Invoice Time</label>
+        <input type="text" id="invoiceTime" placeholder="05:14 PM" />
+        <label>Ordered By</label>
+        <input type="text" id="orderedBy" />
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="exportCard" style="display:none;">
+    <h2>4. Export VPE-format invoice</h2>
+    <div class="toolbar">
+      <button id="exportCsvBtn">Download CSV</button>
+      <button id="exportXlsxBtn" class="secondary">Download XLSX</button>
+    </div>
+    <div class="status" id="exportStatus"></div>
+  </div>
+
+</main>
+
+<script>
+let currentItems = [];
+let headerMeta = {};
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const uploadStatus = document.getElementById('uploadStatus');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files.length) handleFile(fileInput.files[0]); });
+
+async function handleFile(file) {
+  uploadStatus.className = 'status';
+  uploadStatus.textContent = 'Uploading & extracting with Claude... this can take 10-30s.';
+  const fd = new FormData();
+  fd.append('file', file);
+  try {
+    const res = await fetch('/api/extract', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Extraction failed');
+    currentItems = data.items || [];
+    headerMeta = { manufacturer_name: data.manufacturer_name, invoice_no: data.invoice_no, invoice_date: data.invoice_date };
+    uploadStatus.textContent = `Extracted ${currentItems.length} item(s) from "${file.name}" (manufacturer: ${data.manufacturer_name || 'unknown'}).`;
+    renderItems();
+    document.getElementById('reviewCard').style.display = 'block';
+    document.getElementById('headerCard').style.display = 'block';
+    document.getElementById('exportCard').style.display = 'block';
+  } catch (err) {
+    uploadStatus.className = 'status error';
+    uploadStatus.textContent = 'Error: ' + err.message;
+  }
+}
+
+function renderItems() {
+  const body = document.getElementById('itemsBody');
+  body.innerHTML = '';
+  currentItems.forEach((it, idx) => {
+    const lc = it.low_confidence || [];
+    const tr = document.createElement('tr');
+    const fields = ['hsn','company','batch','expiry','brand','pack','qty','free','mrp','rate','disc','gst','gst_amount','amount'];
+    let html = `<td>${idx + 1}</td>`;
+    fields.forEach(f => {
+      const cls = lc.includes(f) ? 'low-conf' : '';
+      html += `<td class="${cls}" contenteditable="true" data-field="${f}" data-idx="${idx}">${it[f] ?? ''}</td>`;
+    });
+    html += `<td><button class="secondary" onclick="removeRow(${idx})">✕</button></td>`;
+    tr.innerHTML = html;
+    body.appendChild(tr);
+  });
+  document.getElementById('itemCount').textContent = `${currentItems.length} item(s)`;
+
+  body.querySelectorAll('td[contenteditable]').forEach(td => {
+    td.addEventListener('blur', () => {
+      const idx = +td.dataset.idx, field = td.dataset.field;
+      let val = td.textContent.trim();
+      if (['qty','free','mrp','rate','disc','gst','gst_amount','amount'].includes(field)) {
+        val = parseFloat(val.replace(/,/g,'')) || 0;
+      }
+      currentItems[idx][field] = val;
+    });
+  });
+}
+
+function removeRow(idx) {
+  currentItems.splice(idx, 1);
+  renderItems();
+}
+
+document.getElementById('addRowBtn').addEventListener('click', () => {
+  currentItems.push({ hsn:'',company:'',batch:'',expiry:'',brand:'',pack:'',qty:0,free:0,mrp:0,rate:0,disc:0,gst:0,gst_amount:0,amount:0,low_confidence:[] });
+  renderItems();
+});
+
+function collectPayload() {
+  return {
+    buyer: {
+      name: document.getElementById('buyerName').value,
+      address: document.getElementById('buyerAddress').value,
+      phone: document.getElementById('buyerPhone').value,
+      email: document.getElementById('buyerEmail').value,
+      dlNo: document.getElementById('buyerDlNo').value,
+      gstin: document.getElementById('buyerGstin').value,
+    },
+    order: {
+      orderId: document.getElementById('orderId').value,
+      invNo: document.getElementById('invNo').value,
+      invoiceDate: document.getElementById('invoiceDate').value,
+      invoiceTime: document.getElementById('invoiceTime').value,
+      orderedBy: document.getElementById('orderedBy').value,
+    },
+    items: currentItems,
+  };
+}
+
+async function doExport(format) {
+  const statusEl = document.getElementById('exportStatus');
+  statusEl.className = 'status';
+  statusEl.textContent = 'Generating...';
+  try {
+    const res = await fetch('/api/export/' + format, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(collectPayload()),
+    });
+    if (!res.ok) { const e = await res.json(); throw new Error(e.error || 'Export failed'); }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoice.${format}`;
+    document.body.appendChild(a); a.click(); a.remove();
+    statusEl.textContent = 'Downloaded.';
+  } catch (err) {
+    statusEl.className = 'status error';
+    statusEl.textContent = 'Error: ' + err.message;
+  }
+}
+
+document.getElementById('exportCsvBtn').addEventListener('click', () => doExport('csv'));
+document.getElementById('exportXlsxBtn').addEventListener('click', () => doExport('xlsx'));
+</script>
+</body>
+</html>
