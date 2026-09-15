@@ -7,33 +7,42 @@ async function extractWithGemini(rawDump) {
   }
   const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-  // Try the primary model first; fall back to alternatives if it's overloaded (503).
-  const modelsToTry = ["gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.5-pro"];
+  // Only gemini-3.6-flash / gemini-3.6-pro are valid on new API keys as of now.
+  // On overload (503), retry the same model with a short backoff instead of
+  // switching to a deprecated model name.
+  const modelsToTry = ["gemini-3.6-flash", "gemini-3.6-pro"];
+  const maxRetriesPerModel = 3;
   let lastErr;
 
   for (const modelName of modelsToTry) {
-    try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: SYSTEM_PROMPT,
-        generationConfig: { responseMimeType: "application/json" },
-      });
+    const model = genAI.getGenerativeModel({
+      model: modelName,
+      systemInstruction: SYSTEM_PROMPT,
+      generationConfig: { responseMimeType: "application/json" },
+    });
 
-      const history = FEW_SHOT.map((m) => ({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }],
-      }));
+    for (let attempt = 1; attempt <= maxRetriesPerModel; attempt++) {
+      try {
+        const history = FEW_SHOT.map((m) => ({
+          role: m.role === "assistant" ? "model" : "user",
+          parts: [{ text: m.content }],
+        }));
 
-      const chat = model.startChat({ history });
-      const result = await chat.sendMessage(`RAW INVOICE DUMP:\n${rawDump.slice(0, 60000)}`);
-      const text = result.response.text();
-      const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/```$/, "");
-      return JSON.parse(cleaned);
-    } catch (e) {
-      lastErr = e;
-      // Only retry with next model on overload/unavailable errors; otherwise fail fast.
-      if (!String(e.message).includes("503") && !String(e.message).includes("overloaded")) {
-        throw e;
+        const chat = model.startChat({ history });
+        const result = await chat.sendMessage(`RAW INVOICE DUMP:\n${rawDump.slice(0, 60000)}`);
+        const text = result.response.text();
+        const cleaned = text.trim().replace(/^```json\s*/i, "").replace(/```$/, "");
+        return JSON.parse(cleaned);
+      } catch (e) {
+        lastErr = e;
+        const isOverload = String(e.message).includes("503") || String(e.message).includes("overloaded");
+        const isNotFound = String(e.message).includes("404");
+        if (isNotFound) break; // this model name is invalid, move to next model
+        if (isOverload && attempt < maxRetriesPerModel) {
+          await new Promise((r) => setTimeout(r, attempt * 2000)); // 2s, 4s backoff
+          continue;
+        }
+        if (!isOverload) throw e; // some other real error, fail fast
       }
     }
   }
