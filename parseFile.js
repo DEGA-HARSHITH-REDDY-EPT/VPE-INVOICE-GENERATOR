@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const XLSX = require("xlsx");
-const pdfParse = require("pdf-parse");
+const { PDFParse } = require("pdf-parse"); // v2 API: class-based, not a plain function
 
 /**
  * Turns any supported manufacturer invoice file into a plain-text "raw dump"
@@ -68,8 +68,9 @@ async function fileToRawDump(filePath, originalName) {
 
   if (ext === ".pdf") {
     const buf = fs.readFileSync(filePath);
-    const data = await pdfParse(buf);
-    return data.text;
+    const parser = new PDFParse({ data: buf });
+    const result = await parser.getText();
+    return result.text;
   }
 
   throw new Error(`Unsupported file type: ${ext}`);
