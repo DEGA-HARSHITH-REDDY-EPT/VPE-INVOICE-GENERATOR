@@ -7,11 +7,13 @@ async function extractWithGroq(rawDump) {
   }
   const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-  // Groq uses OpenAI-style chat messages: system + alternating user/assistant.
+  // Groq's free tier caps at 8,000 tokens/minute total (prompt + few-shot + input + output),
+  // much tighter than Gemini/Claude. Keep the raw dump small and cap output tokens too,
+  // to leave enough headroom within that budget.
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...FEW_SHOT, // already { role: "user"|"assistant", content } — same shape OpenAI-style APIs expect
-    { role: "user", content: `RAW INVOICE DUMP:\n${rawDump.slice(0, 60000)}` },
+    { role: "user", content: `RAW INVOICE DUMP:\n${rawDump.slice(0, 6000)}` },
   ];
 
   const modelsToTry = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
@@ -23,6 +25,7 @@ async function extractWithGroq(rawDump) {
         model,
         messages,
         temperature: 0.1,
+        max_tokens: 2000,
         response_format: { type: "json_object" },
       });
       const text = completion.choices[0].message.content;
