@@ -8,10 +8,10 @@ const { fileToRawDump } = require("./parseFile");
 const { SYSTEM_PROMPT, FEW_SHOT } = require("./extractionPrompt");
 const { buildVpeInvoiceRows, rowsToCsv, rowsToXlsxBuffer } = require("./buildVpeInvoice");
 const { extractWithGemini } = require("./gemini");
+const { extractWithGroq } = require("./groq");
 
-// Which LLM to use for extraction: "gemini" (free tier) or "claude" (paid, generally more accurate).
-// Set LLM_PROVIDER=claude in your environment to switch back.
-const LLM_PROVIDER = process.env.LLM_PROVIDER || "gemini";
+// Which LLM to use for extraction: "groq" (free, fast), "gemini" (free, but prone to 503s), or "claude" (paid, most accurate).
+const LLM_PROVIDER = process.env.LLM_PROVIDER || "groq";
 
 const app = express();
 app.use(cors());
@@ -34,7 +34,13 @@ app.post("/api/extract", upload.single("file"), async (req, res) => {
 
     let parsed;
 
-    if (LLM_PROVIDER === "gemini") {
+    if (LLM_PROVIDER === "groq") {
+      try {
+        parsed = await extractWithGroq(rawDump);
+      } catch (e) {
+        return res.status(502).json({ error: "Groq extraction failed: " + e.message });
+      }
+    } else if (LLM_PROVIDER === "gemini") {
       try {
         parsed = await extractWithGemini(rawDump);
       } catch (e) {
