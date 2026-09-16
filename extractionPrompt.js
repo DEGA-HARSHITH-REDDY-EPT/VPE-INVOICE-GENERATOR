@@ -26,6 +26,8 @@ ALSO EXTRACT (invoice-level, once):
 - invoice_no: manufacturer's own invoice/bill number
 - invoice_date: normalized to DD-MM-YYYY
 
+INPUT FORMAT NOTE: PDF invoices are pre-processed into "TABLE HEADER: ... " lines followed by one reconstructed row per line item, in "ColumnName: value" pairs. When a PDF's table had multiple line items packed into one cell (common for Sno./Item Description in some layouts), that cell's text may repeat identically across several reconstructed rows — in that case, treat the repeated text as containing multiple items concatenated in order, and match them positionally to the (correctly split) numeric columns in the same row order (1st item name ↔ 1st row's numbers, 2nd item name ↔ 2nd row's numbers, etc).
+
 RULES:
 - Skip subtotal/total/tax-summary rows — only real product line items go in "items".
 - If a field truly cannot be determined, use "" for strings or 0 for numbers, and add its field name to that item's "low_confidence" array.
