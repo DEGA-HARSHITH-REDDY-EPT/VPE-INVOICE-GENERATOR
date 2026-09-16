@@ -69,7 +69,65 @@ async function fileToRawDump(filePath, originalName) {
   if (ext === ".pdf") {
     const buf = fs.readFileSync(filePath);
     const parser = new PDFParse({ data: buf });
+
+    // Prefer getTable(): it keeps values grouped by column instead of flattening
+    // everything into reading-order text, which is unreliable for invoices (numbers
+    // end up in the wrong apparent order). When a row spans multiple line items,
+    // each cell holds newline-separated values in matching positions across columns
+    // — we zip those back together into clean, unambiguous per-item rows below.
+    try {
+      const tableResult = await parser.getTable();
+      const hasTable = tableResult.pages.some((p) => p.tables && p.tables.length > 0);
+      if (hasTable) {
+        let out = "";
+        for (const page of tableResult.pages) {
+          for (const table of page.tables || []) {
+            if (table.length === 0) continue;
+            const header = table[0].map((h) => (h || "").replace(/\n/g, " ").trim());
+            // Skip genuinely empty/noise tables (e.g. a decorative header block with
+            // no real cell content) — but don't require multiple columns, since some
+            // legitimate tables (like the totals/grand-total block) are single-column.
+            const meaningfulHeaderCount = header.filter((h) => h && h.length > 1).length;
+            if (meaningfulHeaderCount < 1) continue;
+            // Skip tables that are pure noise for extraction purposes (detailed tax-rate
+            // breakdowns, boilerplate terms) — we already get Sub Total/GST/NET PAYABLE
+            // from the totals table, which is what the extraction actually needs.
+            const headerText = header.join(" ").toLowerCase();
+            if (headerText.includes("terms & conditions") || headerText.includes("tax detail")) continue;
+
+            out += "TABLE HEADER: " + header.join(" | ") + "\n";
+            for (let r = 1; r < table.length; r++) {
+              const row = table[r];
+              // Split each cell on newlines; a row with N line items has N lines per cell.
+              const cellLines = row.map((cell) => String(cell ?? "").split("\n"));
+              const maxLines = Math.max(1, ...cellLines.map((l) => l.length));
+              for (let li = 0; li < maxLines; li++) {
+                const reconstructed = header.map((h, ci) => {
+                  const val = (cellLines[ci] && cellLines[ci][li] !== undefined) ? cellLines[ci][li] : (cellLines[ci]?.[0] || "");
+                  return `${h}: ${val.trim()}`;
+                });
+                const lineText = reconstructed.join(" | ").trim();
+                // Skip rows that carry no real content (just colons/pipes/blank values).
+                const meaningfulValueCount = reconstructed.filter((cell) => {
+                  const v = cell.split(":").slice(1).join(":").trim();
+                  return v && v !== ":" && v.length > 0;
+                }).length;
+                if (meaningfulValueCount >= 1) out += lineText + "\n";
+              }
+            }
+            out += "\n";
+          }
+        }
+        await parser.destroy();
+        if (out.trim()) return out;
+      }
+    } catch (e) {
+      // getTable can fail on some PDFs (scanned/no clear table structure) — fall
+      // through to plain text extraction below.
+    }
+
     const result = await parser.getText();
+    await parser.destroy();
     return result.text;
   }
 
