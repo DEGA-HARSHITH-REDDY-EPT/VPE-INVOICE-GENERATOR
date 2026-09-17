@@ -13,7 +13,7 @@ async function extractWithGroq(rawDump) {
   const messages = [
     { role: "system", content: SYSTEM_PROMPT },
     ...FEW_SHOT, // already { role: "user"|"assistant", content } — same shape OpenAI-style APIs expect
-    { role: "user", content: `RAW INVOICE DUMP:\n${rawDump.slice(0, 3000)}` },
+    { role: "user", content: `RAW INVOICE DUMP:\n${rawDump.slice(0, 2800)}` },
   ];
 
   const modelsToTry = ["openai/gpt-oss-120b", "openai/gpt-oss-20b"];
@@ -25,7 +25,7 @@ async function extractWithGroq(rawDump) {
         model,
         messages,
         temperature: 0.1,
-        max_tokens: 3000,
+        max_tokens: 4000,
         response_format: { type: "json_object" },
       });
       const text = completion.choices[0].message.content;
