@@ -19,7 +19,7 @@ CANONICAL OUTPUT SCHEMA (per line item):
 - disc: discount, as a percentage number (e.g. 0, 5). Default 0 if absent.
 - gst: GST rate as a percentage number (e.g. 5, 12, 18). If invoice splits CGST+SGST or shows IGST, sum them to get the total GST %.
 - gst_amount: GST amount in currency (number). If not directly given, compute as round(amount * gst / (100+gst)) only if amount is tax-inclusive, or round((rate*qty - discount) * gst/100) if amount is tax-exclusive — infer from context; otherwise leave your best computed value.
-- amount: total line amount (number) — the final amount for that line as printed.
+- amount: the FINAL amount for that line, GST-INCLUSIVE (i.e. what the buyer actually pays for that line — taxable value after any discount, PLUS gst_amount on top). This is the number that should sum across all items to match the invoice's own grand/net total. Do not confuse this with a line's pre-GST taxable/sub-total value — amount always includes GST.
 
 ALSO EXTRACT (invoice-level, once):
 - manufacturer_name: the company issuing this invoice (the seller)
@@ -39,13 +39,13 @@ RULES:
   2. If a line's amount is completely missing, but the invoice shows a grand/taxable total AND every other line's amount is known, compute the missing amount as (grand total − sum of other known amounts).
   3. If the invoice states a total quantity across all items, and every other line's quantity is known, compute the missing quantity as (total quantity − sum of other known quantities).
   4. Never guess or invent HSN codes, batch numbers, or brand names this way — only numeric quantity/rate/amount fields are safe to back-calculate. If HSN or batch is genuinely absent from the source, leave it "" and flag it in low_confidence.
-- FOOTER-LEVEL DISCOUNTS: Some invoices apply a discount only in the summary/footer totals table (e.g. "SCH. DISC." or "Scheme Discount"), separate from each line's own Disc.% column, which may show 0 there. If you see such a footer discount amount that isn't otherwise reflected in the line items, and the sum of line amounts minus that discount equals the invoice's stated Sub Total / taxable value:
-  - Keep the "disc" field as literally printed on that line (often 0) — do NOT convert the footer discount into a fabricated per-line discount percentage; that field should reflect what the manufacturer actually stated for that line, not a back-calculated figure.
-  - If there's only one line item, apply the full footer discount to that line's "amount" instead (amount = original line amount − its share of the footer discount).
-  - If there are multiple line items, distribute the footer discount across them proportionally by each line's amount, adjusting each line's "amount" accordingly.
-  - After applying, recompute gst_amount from the discounted (post-discount) "amount" for that line, not the gross pre-discount figure — GST is charged on the discounted value.
+- FOOTER-LEVEL DISCOUNTS: Some invoices apply a discount only in the summary/footer totals table (e.g. "SCH. DISC." or "Scheme Discount"), separate from each line's own Disc.% column, which may correctly show 0 there. If you see such a footer discount amount that isn't otherwise reflected in the line items:
+  - Keep the "disc" field as literally printed on that line (often 0) — do NOT convert the footer discount into a fabricated per-line discount percentage.
+  - Work out the discounted taxable value for that line: original pre-discount amount minus its share of the footer discount (full share if it's the only line item, proportional by amount if there are several).
+  - gst_amount = that discounted taxable value × gst% ÷ 100.
+  - Set the final "amount" field to (discounted taxable value + gst_amount) — remember, amount must always be GST-inclusive, per its field definition above. Do not leave amount as just the pre-GST taxable value.
   - Add "amount" and "gst_amount" to that item's low_confidence array (not "disc", since disc itself wasn't changed) so a human reviewer double-checks the allocation.
-  - Sanity-check your result: sum of all items' final "amount" plus total gst_amount should equal the invoice's own grand/net total. If it doesn't reconcile, prefer matching the invoice's stated grand total.
+  - Sanity-check your result: the sum of all items' final "amount" should equal the invoice's own grand/net total. If it doesn't reconcile, prefer matching the invoice's stated grand total.
 - PDF COLUMN SANITY CHECK: Plain-text PDF extraction sometimes loses visual column alignment, causing qty/mrp/rate/gst/amount to appear in the wrong apparent order. Before finalizing each item, sanity-check: (a) qty × rate should roughly equal amount (before discount/GST adjustments) — if it's wildly off, your column mapping is likely shifted; (b) MRP should normally be ≥ rate (MRP is a ceiling price, rate is what's actually charged) — if rate > mrp, that's a red flag; (c) a GST% value is almost always a small number (0–28), so if what you assigned to "gst" looks like a price and what you assigned to "rate" looks like a percentage, they're likely swapped. If a check fails, re-derive the correct column order from the header row and the other consistent items on the invoice, rather than keeping an internally inconsistent result. Flag any field you had to correct this way in low_confidence.
 - Return ONLY valid JSON matching this exact structure, no markdown fences, no commentary:
 
