@@ -68,15 +68,18 @@ async function fileToRawDump(filePath, originalName) {
 
   if (ext === ".pdf") {
     const buf = fs.readFileSync(filePath);
-    const parser = new PDFParse({ data: buf });
 
     // Prefer getTable(): it keeps values grouped by column instead of flattening
     // everything into reading-order text, which is unreliable for invoices (numbers
     // end up in the wrong apparent order). When a row spans multiple line items,
     // each cell holds newline-separated values in matching positions across columns
     // — we zip those back together into clean, unambiguous per-item rows below.
+    // Use a fresh parser instance per attempt — a destroyed parser can't be reused.
     try {
-      const tableResult = await parser.getTable();
+      const tableParser = new PDFParse({ data: buf });
+      const tableResult = await tableParser.getTable();
+      await tableParser.destroy();
+
       const hasTable = tableResult.pages.some((p) => p.tables && p.tables.length > 0);
       if (hasTable) {
         let out = "";
@@ -118,16 +121,22 @@ async function fileToRawDump(filePath, originalName) {
             out += "\n";
           }
         }
-        await parser.destroy();
-        if (out.trim()) return out;
+        // Sanity check: some PDF layouts cause getTable() to misparse structure
+        // entirely (e.g. treating a repeated letterhead as a giant single column,
+        // which duplicates itself on every row and can even drop the actual product
+        // row completely). A wildly oversized dump for what's normally a short
+        // single-page invoice is a strong signal of that failure mode — bail out
+        // to plain text extraction instead of feeding garbage to the model.
+        if (out.trim() && out.length < 6000) return out;
       }
     } catch (e) {
       // getTable can fail on some PDFs (scanned/no clear table structure) — fall
       // through to plain text extraction below.
     }
 
-    const result = await parser.getText();
-    await parser.destroy();
+    const textParser = new PDFParse({ data: buf });
+    const result = await textParser.getText();
+    await textParser.destroy();
     return result.text;
   }
 
