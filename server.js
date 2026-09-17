@@ -4,11 +4,11 @@ const cors = require("cors");
 const path = require("path");
 const Anthropic = require("@anthropic-ai/sdk");
 
-const { fileToRawDump } = require("./parseFile");
+const { fileToRawDump, renderPdfPagesAsImages } = require("./parseFile");
 const { SYSTEM_PROMPT, FEW_SHOT } = require("./extractionPrompt");
 const { buildVpeInvoiceRows, rowsToCsv, rowsToXlsxBuffer } = require("./buildVpeInvoice");
 const { extractWithGemini } = require("./gemini");
-const { extractWithGroq } = require("./groq");
+const { extractWithGroq, extractWithGroqVision } = require("./groq");
 
 // Which LLM to use for extraction: "groq" (free, fast), "gemini" (free, but prone to 503s), or "claude" (paid, most accurate).
 const LLM_PROVIDER = process.env.LLM_PROVIDER || "groq";
@@ -28,11 +28,29 @@ app.post("/api/extract", upload.single("file"), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: "No file uploaded" });
 
     const rawDump = await fileToRawDump(req.file.path, req.file.originalname);
-    if (!rawDump || !rawDump.trim()) {
-      return res.status(422).json({ error: "Could not read any content from this file (empty or unsupported/scanned PDF)." });
-    }
+    const isPdf = req.file.originalname.toLowerCase().endsWith(".pdf");
 
     let parsed;
+
+    // A PDF with no usable embedded text (fileToRawDump returns "" for that
+    // case) is likely a scanned/flattened PDF — fall back to rendering it as
+    // an image and using vision extraction instead of failing outright.
+    if (isPdf && (!rawDump || !rawDump.trim())) {
+      if (LLM_PROVIDER !== "groq") {
+        return res.status(422).json({ error: "This PDF has no readable text layer (likely scanned). Vision fallback is currently only wired up for the Groq provider." });
+      }
+      try {
+        const images = await renderPdfPagesAsImages(req.file.path);
+        parsed = await extractWithGroqVision(images);
+      } catch (e) {
+        return res.status(502).json({ error: "Vision extraction failed: " + e.message });
+      }
+      return res.json(parsed);
+    }
+
+    if (!rawDump || !rawDump.trim()) {
+      return res.status(422).json({ error: "Could not read any content from this file (empty or unsupported)." });
+    }
 
     if (LLM_PROVIDER === "groq") {
       try {

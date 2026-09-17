@@ -137,10 +137,34 @@ async function fileToRawDump(filePath, originalName) {
     const textParser = new PDFParse({ data: buf });
     const result = await textParser.getText();
     await textParser.destroy();
+
+    // If the actual embedded text is nearly empty, this PDF likely has no real
+    // text layer at all — a flattened/rasterized ("scanned-looking") PDF where
+    // every character you see is really part of one big embedded image. No text
+    // extraction technique can recover data that was never encoded as text; the
+    // caller should fall back to rendering the page as an image and using vision
+    // extraction instead (see needsVisionFallback / renderPdfAsImage below).
+    if (!result.text || result.text.trim().length < 50) {
+      return ""; // signals "no usable text" to the caller
+    }
     return result.text;
   }
 
   throw new Error(`Unsupported file type: ${ext}`);
 }
 
-module.exports = { fileToRawDump };
+/**
+ * Renders a PDF's page(s) to PNG images (base64) for vision-based extraction,
+ * used when the PDF has no real embedded text layer (a scanned/flattened PDF).
+ * Returns an array of base64 PNG strings, one per page (capped to avoid huge
+ * requests — invoices are almost always 1 page).
+ */
+async function renderPdfPagesAsImages(filePath, maxPages = 2) {
+  const buf = fs.readFileSync(filePath);
+  const parser = new PDFParse({ data: buf });
+  const result = await parser.getScreenshot({ scale: 2 });
+  await parser.destroy();
+  return result.pages.slice(0, maxPages).map((p) => Buffer.from(p.data).toString("base64"));
+}
+
+module.exports = { fileToRawDump, renderPdfPagesAsImages };

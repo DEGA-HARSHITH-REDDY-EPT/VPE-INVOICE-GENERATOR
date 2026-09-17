@@ -103,12 +103,12 @@ function buildVpeInvoiceRows({ buyer, order, items }) {
 
   push("", "", "", "", "", "", "", "", "", "", "", "", "", fmtMoney(gstTotal), fmtMoney(amountTotal));
   push("");
-  push("", "", "", "", "", "", "", "", "", "", "", "", "", "Sub Total", `₹ ${fmtMoney(amountTotal - gstTotal)}`);
+  push("", "", "", "", "", "", "", "", "", "", "", "", "", "Sub Total", `₹ ${fmtMoney(amountTotal)}`);
   push("", "", "", "", "", "", "", "", "", "", "", "", "", "Less Disc", "₹ 0.00");
   push("", "", "", "", "", "", "", "", "", "", "", "", "", "GST", `₹ ${fmtMoney(gstTotal)}`);
   push("", "", "", "", "", "", "", "", "", "", "", "", "", "Add", "—");
   push("", "", "", "", "", "", "", "", "", "", "", "", "", "Add / Less", "—");
-  const netPayable = Math.round(amountTotal);
+  const netPayable = Math.round(amountTotal + gstTotal);
   push("", "", "", "", "", "", "", "", "", "", "", "", "", "NET PAYABLE", `₹ ${netPayable.toLocaleString("en-IN")}`);
   push("", "", "", "", "", "", "", "", "", "", "", "", "", `Rupees ${numberToWordsIndian(netPayable)} Only`, "");
   push("");
